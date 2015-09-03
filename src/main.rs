@@ -1,11 +1,11 @@
-use std::io::{Stdin, stdin, Read};
+use std::io::{stdin, Read};
 use std::io::Error;
 use std::str::{from_utf8};
 use lust::lisp::read::{repl};
 extern crate lust;
 
 fn main() {
-    let mut buf: &mut Vec<u8> = &mut &mut vec![];
+    let buf: &mut Vec<u8> = &mut &mut vec![];
     let bytes = stdin().bytes();
     let mut chars = bytes.scan(buf, scanner);
     repl(&mut chars);
