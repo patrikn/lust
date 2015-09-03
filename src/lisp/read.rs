@@ -13,10 +13,6 @@ pub enum ReadError {
     Eof
 }
 
-fn Invalid(message: &str) -> ReadError {
-    ReadError::Invalid(message.to_string())
-}
-
 impl From<io::Error> for ReadError {
     fn from(err: io::Error) -> ReadError {
         ReadError::Io(err)
@@ -58,7 +54,7 @@ pub fn read_expr(input: &mut Peekable<&mut Iterator<Item = Result<char, io::Erro
 {
     let c = match input.peek() {
         Some(&Ok(ref c)) => Some(*c),
-        Some(&Err(ref e)) => None,
+        Some(&Err(_)) => None,
         None => return Err(ReadError::Eof)
     };
     match c {
@@ -97,7 +93,7 @@ macro_rules! try_peek {
                           let peek = $expr.peek();
                           match peek {
                               Some(&Result::Ok(ref val)) => Some(*val),
-                              Some(&Result::Err(ref err)) => None,
+                              Some(&Result::Err(_)) => None,
                               None => None
                           }
                       };
@@ -107,7 +103,7 @@ macro_rules! try_peek {
                               match $expr.next() {
                                   Some(Err(e)) => return Err(From::from(e)),
                                   None => None,
-                                  Some(Ok(v)) => panic!("peek and next disagree")
+                                  Some(Ok(_)) => panic!("peek and next disagree")
                               }
                           }
                       }
@@ -119,18 +115,6 @@ pub fn read_function_params(input: &mut Peekable<&mut Iterator<Item = Result<cha
     let mut params: Vec<Box<Expression>> = vec![];
     let mut acc = String::new();
     loop {
-        // let stupid_rust = {
-        //     let peek = input.peek();
-        //     match peek {
-        //         Some(&Err(ref e)) => None,
-        //         Some(&Ok(ref c)) => Some(*c),
-        //         None => break
-        //     }
-        // };
-        // let c = match stupid_rust {
-        //     None => return Err(From::from(input.next().expect("Error disappeared").err().expect("Error disappeared!"))),
-        //     Some(c) => c
-        // };
         let c = match try_peek!(input) {
             Some(c) => c,
             None => break
@@ -168,61 +152,77 @@ pub fn read_number(input: &mut Peekable<&mut Iterator<Item = Result<char, io::Er
 #[cfg(test)]
 mod test {
     use super::*;
-    use std::iter::{Iterator,Peekable};
+    use std::iter::{Iterator,Map};
     use std::str::{Chars};
+    use std::io::Error;
+
+    fn char_to_result(c: char) -> Result<char, Error> {
+        Ok(c)
+    }
+
+    fn input(s: &'static str) -> Map<Chars<'static>, fn(char)->Result<char, Error>> {
+        return s.chars().map(char_to_result);
+    }
+
+    fn iterator<'a, T>(iterator: &'a mut Iterator<Item=T>) -> &'a mut Iterator<Item=T> {
+        iterator
+    }
 
     #[test]
     fn test_read_add_function() {
-        let foo: &mut Iterator<Item = char> = &mut "+".chars();
-        let peekable: &mut Peekable<&mut Iterator<Item = char>> = &mut foo.peekable();
+        let mut m = input("+");
+        let peekable = &mut iterator(&mut m).peekable();
         match read_function_name(peekable) {
-            Error(e) => panic!("Didn't get function"),
+            Err(_) => panic!("Didn't get function"),
             _ => ()
-        }
+        };
     }
 
     #[test]
     fn test_read_unknown_function() {
-        let foo: &mut Iterator<Item = char> = &mut "apa".chars();
-        let peekable: &mut Peekable<&mut Iterator<Item = char>> = &mut foo.peekable();
+        let mut m = input("apa");
+        let peekable = &mut iterator(&mut m).peekable();
         match read_function_name(peekable) {
-            Ok(e) => panic!("Should get error"),
+            Ok(_) => panic!("Should get error"),
             _ => ()
         }
     }
 
     #[test]
     fn test_read_number() {
-        let foo: &mut Iterator<Item = char> = &mut "14 ".chars();
-        let peekable: &mut Peekable<&mut Iterator<Item = char>> = &mut foo.peekable();
-        let val = read_number(peekable);
+        let mut m = input("14 ");
+        let peekable = &mut iterator(&mut m).peekable();
+        let val = read_number(peekable).unwrap();
 
         assert_eq!(14, val);
     }
 
     #[test]
     fn test_read_negative_number() {
-        let foo: &mut Iterator<Item = char> = &mut "-14 ".chars();
-        let peekable: &mut Peekable<&mut Iterator<Item = char>> = &mut foo.peekable();
-        let val = read_number(peekable);
+        let mut m = input("-14 ");
+        let peekable = &mut iterator(&mut m).peekable();
+        let val = read_number(peekable).unwrap();
 
         assert_eq!(-14, val);
     }
 
     #[test]
     fn test_read_number_right_paren() {
-        let foo: &mut Iterator<Item = char> = &mut "2701)".chars();
-        let peekable: &mut Peekable<&mut Iterator<Item = char>> = &mut foo.peekable();
-        let val = read_number(peekable);
+        let mut m = input("2701)");
+        let peekable = &mut iterator(&mut m).peekable();
+        let val = read_number(peekable).unwrap();
 
         assert_eq!(2701, val);
+
+        let next = peekable.next().expect("Right paren was consumed");
+        assert_eq!(')', next.unwrap());
     }
 
     #[test]
     fn test_read_number_params() {
-        let foo: &mut Iterator<Item = char> = &mut "1 2)".chars();
-        let peekable: &mut Peekable<&mut Iterator<Item = char>> = &mut foo.peekable();
-        let params = read_function_params(peekable);
+        let mut m = input("1 2)");
+        let peekable = &mut iterator(&mut m).peekable();
+        let params = read_function_params(peekable).unwrap();
         assert_eq!(2, params.len());
         assert_eq!(1, params[0].eval());
         assert_eq!(2, params[1].eval());
@@ -230,17 +230,25 @@ mod test {
 
     #[test]
     fn test_read_expr() {
-        let foo: &mut Iterator<Item = char> = &mut "(+ 1 2)".chars();
-        let peekable: &mut Peekable<&mut Iterator<Item = char>> = &mut foo.peekable();
-        let expr = read_expr(peekable);
+        let mut m = input("(+ 1 2)");
+        let peekable = &mut iterator(&mut m).peekable();
+
+        let expr = read_expr(peekable).unwrap();
         assert_eq!(3, expr.eval());
     }
 
     #[test]
     fn test_read_nested_expr() {
-        let foo: &mut Iterator<Item = char> = &mut "(+ 1 (+ 1 1))".chars();
-        let peekable: &mut Peekable<&mut Iterator<Item = char>> = &mut foo.peekable();
+        let mut m = input("(+ 1 (+ 1 1))");
+        let peekable = &mut iterator(&mut m).peekable();
         let expr = read_expr(peekable);
-        assert_eq!(3, expr.eval());
+        assert_eq!(3, expr.unwrap().eval());
+    }
+
+    #[test]
+    fn test_read_if() {
+        let mut m = input("(if (+ 1 1) 1 2)");
+        let peekable = &mut iterator(&mut m).peekable();
+        let expr = read_expr(peekable).unwrap();
     }
 }
