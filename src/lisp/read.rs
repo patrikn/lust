@@ -3,7 +3,7 @@ use std::io;
 use std::num;
 use std::fmt;
 use std::error::{Error};
-pub use lisp::expr::{Add,Expression,Function,Call,Literal};
+pub use lisp::expr::{Add,Expression,Function,Call,Literal,If};
 
 #[derive(Debug)]
 pub enum ReadError {
@@ -61,7 +61,7 @@ pub fn read_expr(input: &mut Peekable<&mut Iterator<Item = Result<char, io::Erro
         Some(c) => match c {
             '(' => {input.next();
                     return Ok(Box::new(Call::new(try!(read_function_name(input)),
-                                                 try!(read_function_params(input)))))
+                                                  try!(read_function_params(input)))))
                    },
             '0'...'9'|'+'|'-' => Ok(Box::new(Literal::new(try!(read_number(input))))),
             ' '|'\n'|'\r' => {input.next(); Ok(try!(read_expr(input))) },
@@ -84,6 +84,7 @@ pub fn read_function_name(input: &mut Peekable<&mut Iterator<Item = Result<char,
     let n: &str = &name;
     match n {
         "+" => return Ok(Box::new(Add::new())),
+        "if" => return Ok(Box::new(If::new())),
         _ => Err(ReadError::Invalid(format!("Unknown function '{}'", name)))
     }
 }
@@ -246,9 +247,18 @@ mod test {
     }
 
     #[test]
-    fn test_read_if() {
+    fn test_read_if_nonzero() {
         let mut m = input("(if (+ 1 1) 1 2)");
         let peekable = &mut iterator(&mut m).peekable();
         let expr = read_expr(peekable).unwrap();
+        assert_eq!(1, expr.eval());
+    }
+
+    #[test]
+    fn test_read_if_zero() {
+        let mut m = input("(if (+ 1 -1) 1 (+ 2 3))");
+        let peekable = &mut iterator(&mut m).peekable();
+        let expr = read_expr(peekable).unwrap();
+        assert_eq!(5, expr.eval());
     }
 }

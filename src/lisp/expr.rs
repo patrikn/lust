@@ -59,10 +59,31 @@ impl Expression for Call {
     }
 }
 
+#[derive(Debug)]
+pub struct If;
+
+impl If {
+    pub fn new() -> If {
+        If
+    }
+}
+
+impl Function for If {
+    fn call(&self, args: &Vec<Box<Expression>>) -> i64 {
+        let result = args[0].eval();
+        if result != 0 {
+            args[1].eval()
+        } else {
+            args[2].eval()
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::Function;
     use super::Add;
+    use super::If;
     use super::Call;
     use super::Expression;
     use super::Literal;
@@ -97,5 +118,23 @@ mod tests {
                                                    args: vec![Box::new(Literal {val:2}),
                                                               Box::new(Literal {val:3})]})]};
         assert_eq!(6, expr.eval());
+    }
+
+    #[test]
+    fn test_if_nonzero() {
+        assert_eq!(4, If.call(&vec![ Box::new(Literal {val:1}),
+                                      Box::new(Call {function: Box::new(Add),
+                                                     args: vec![Box::new(Literal {val:1}),
+                                                                Box::new(Literal {val:3})]}),
+                                      Box::new(Literal {val:2})]));
+    }
+
+    #[test]
+    fn test_if_zero() {
+        assert_eq!(2, If.call(&vec![ Box::new(Literal {val:0}),
+                                      Box::new(Call {function: Box::new(Add),
+                                                     args: vec![Box::new(Literal {val:1}),
+                                                                Box::new(Literal {val:3})]}),
+                                      Box::new(Literal {val:2})]));
     }
 }
