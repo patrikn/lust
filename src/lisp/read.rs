@@ -3,7 +3,7 @@ use std::io;
 use std::num;
 use std::fmt;
 use std::error::{Error};
-pub use lisp::expr::{Add,Expression,Function,Call,Literal,If};
+pub use lisp::expr::{Add,Expression,Function,Call,Literal,If,Environment};
 
 #[derive(Debug)]
 pub enum ReadError {
@@ -39,10 +39,14 @@ impl fmt::Display for ReadError {
 
 pub fn repl(input: &mut Iterator<Item = Result<char, io::Error>>) {
     let peekable = &mut input.peekable();
+    let env = Environment::new();
     loop {
         let expr = read_expr(peekable);
         match expr {
-            Ok(expr) => println!("{}", expr.eval()),
+            Ok(expr) => match expr.eval(&env) {
+                Ok(val) => println!("{}", val),
+                Err(e) => println!("Error: {}", e)
+            },
             Err(ReadError::Eof) => return,
             Err(e) => println!("Error: {}", e)
         }
@@ -221,44 +225,49 @@ mod test {
 
     #[test]
     fn test_read_number_params() {
+        let env = Environment::new();
         let mut m = input("1 2)");
         let peekable = &mut iterator(&mut m).peekable();
         let params = read_function_params(peekable).unwrap();
         assert_eq!(2, params.len());
-        assert_eq!(1, params[0].eval());
-        assert_eq!(2, params[1].eval());
+        assert_eq!(1, params[0].eval(&env).unwrap());
+        assert_eq!(2, params[1].eval(&env).unwrap());
     }
 
     #[test]
     fn test_read_expr() {
+        let env = Environment::new();
         let mut m = input("(+ 1 2)");
         let peekable = &mut iterator(&mut m).peekable();
 
         let expr = read_expr(peekable).unwrap();
-        assert_eq!(3, expr.eval());
+        assert_eq!(3, expr.eval(&env).unwrap());
     }
 
     #[test]
     fn test_read_nested_expr() {
+        let env = Environment::new();
         let mut m = input("(+ 1 (+ 1 1))");
         let peekable = &mut iterator(&mut m).peekable();
         let expr = read_expr(peekable);
-        assert_eq!(3, expr.unwrap().eval());
+        assert_eq!(3, expr.unwrap().eval(&env).unwrap());
     }
 
     #[test]
     fn test_read_if_nonzero() {
+        let env = Environment::new();
         let mut m = input("(if (+ 1 1) 1 2)");
         let peekable = &mut iterator(&mut m).peekable();
         let expr = read_expr(peekable).unwrap();
-        assert_eq!(1, expr.eval());
+        assert_eq!(1, expr.eval(&env).unwrap());
     }
 
     #[test]
     fn test_read_if_zero() {
+        let env = Environment::new();
         let mut m = input("(if (+ 1 -1) 1 (+ 2 3))");
         let peekable = &mut iterator(&mut m).peekable();
         let expr = read_expr(peekable).unwrap();
-        assert_eq!(5, expr.eval());
+        assert_eq!(5, expr.eval(&env).unwrap());
     }
 }
