@@ -3,7 +3,7 @@ use std::io;
 use std::num;
 use std::fmt;
 use std::error::{Error};
-pub use lisp::expr::{Add,Expression,Function,Call,Literal,If,Environment};
+pub use lisp::expr::{Add,Expression,Function,Call,Literal,If,Environment,Reference,Set};
 
 #[derive(Debug)]
 pub enum ReadError {
@@ -39,11 +39,11 @@ impl fmt::Display for ReadError {
 
 pub fn repl(input: &mut Iterator<Item = Result<char, io::Error>>) {
     let peekable = &mut input.peekable();
-    let env = Environment::new();
+    let mut env = Environment::new();
     loop {
         let expr = read_expr(peekable);
         match expr {
-            Ok(expr) => match expr.eval(&env) {
+            Ok(expr) => match expr.eval(&mut env) {
                 Ok(val) => println!("{}", val),
                 Err(e) => println!("Error: {}", e)
             },
@@ -69,28 +69,39 @@ pub fn read_expr(input: &mut Peekable<&mut Iterator<Item = Result<char, io::Erro
                    },
             '0'...'9'|'+'|'-' => Ok(Box::new(Literal::new(try!(read_number(input))))),
             ' '|'\n'|'\r' => {input.next(); Ok(try!(read_expr(input))) },
-            _ => { input.next(); Err(ReadError::Invalid(format!("Invalid input '{}'", c))) }
+            _ => read_reference(input)
         },
         None => return Err(From::from(input.next().expect("Input disappeared!").err().expect("Error disappeared!")))
     }
 }
 
+pub fn read_reference(input: &mut Peekable<&mut Iterator<Item = Result<char, io::Error>>>)
+    -> Result<Box<Expression>, ReadError>
+{
+    let sym: String = try!(read_symbol(input));
+    Ok(Box::new(Reference::new(&sym)))
+}
+
 pub fn read_function_name(input: &mut Peekable<&mut Iterator<Item = Result<char, io::Error>>>) -> Result<Box<Function>, ReadError> {
+    let name = try!(read_symbol(input));
+    match name.as_ref() {
+        "+" => return Ok(Box::new(Add::new())),
+        "if" => return Ok(Box::new(If::new())),
+        "set" => return Ok(Box::new(Set::new())),
+        _ => Err(ReadError::Invalid(format!("Unknown function '{}'", name)))
+    }
+}
+
+pub fn read_symbol(input: &mut Peekable<&mut Iterator<Item = Result<char, io::Error>>>) -> Result<String, ReadError> {
     let mut name = String::new();
     for c in input {
-        match c {
-            Ok(' ') => break,
-            Ok(c) => name.push(c),
-            Err(e) => return Err(From::from(e))
+        match try!(c) {
+            ' '|')'|'\n'|'\r' => break,
+            c => name.push(c)
         }
     }
 
-    let n: &str = &name;
-    match n {
-        "+" => return Ok(Box::new(Add::new())),
-        "if" => return Ok(Box::new(If::new())),
-        _ => Err(ReadError::Invalid(format!("Unknown function '{}'", name)))
-    }
+    return Ok(name);
 }
 
 macro_rules! try_peek {
@@ -129,9 +140,9 @@ pub fn read_function_params(input: &mut Peekable<&mut Iterator<Item = Result<cha
         match c {
             '0'...'9'|'-' => params.push(Box::new(Literal::new(try!(read_number(input))))),
             '(' => params.push(try!(read_expr(input))),
-            ' ' => { input.next(); continue },
+            ' '|'\n'|'\r'|'\t' => { input.next(); continue },
             ')' => { input.next(); return Ok(params) },
-            _ => { input.next(); return Err(ReadError::Invalid(format!("Invalid input '{}'", c))) }
+            _ => { params.push(try!(read_reference(input))) }
         }
     }
     Err(ReadError::Eof)
@@ -225,49 +236,79 @@ mod test {
 
     #[test]
     fn test_read_number_params() {
-        let env = Environment::new();
+        let mut env = Environment::new();
         let mut m = input("1 2)");
         let peekable = &mut iterator(&mut m).peekable();
         let params = read_function_params(peekable).unwrap();
         assert_eq!(2, params.len());
-        assert_eq!(1, params[0].eval(&env).unwrap());
-        assert_eq!(2, params[1].eval(&env).unwrap());
+        assert_eq!(1, params[0].eval(&mut env).unwrap());
+        assert_eq!(2, params[1].eval(&mut env).unwrap());
     }
 
     #[test]
     fn test_read_expr() {
-        let env = Environment::new();
+        let mut env = Environment::new();
         let mut m = input("(+ 1 2)");
         let peekable = &mut iterator(&mut m).peekable();
 
         let expr = read_expr(peekable).unwrap();
-        assert_eq!(3, expr.eval(&env).unwrap());
+        assert_eq!(3, expr.eval(&mut env).unwrap());
     }
 
     #[test]
     fn test_read_nested_expr() {
-        let env = Environment::new();
+        let mut env = Environment::new();
         let mut m = input("(+ 1 (+ 1 1))");
         let peekable = &mut iterator(&mut m).peekable();
         let expr = read_expr(peekable);
-        assert_eq!(3, expr.unwrap().eval(&env).unwrap());
+        assert_eq!(3, expr.unwrap().eval(&mut env).unwrap());
     }
 
     #[test]
     fn test_read_if_nonzero() {
-        let env = Environment::new();
+        let mut env = Environment::new();
         let mut m = input("(if (+ 1 1) 1 2)");
         let peekable = &mut iterator(&mut m).peekable();
         let expr = read_expr(peekable).unwrap();
-        assert_eq!(1, expr.eval(&env).unwrap());
+        assert_eq!(1, expr.eval(&mut env).unwrap());
     }
 
     #[test]
     fn test_read_if_zero() {
-        let env = Environment::new();
+        let mut env = Environment::new();
         let mut m = input("(if (+ 1 -1) 1 (+ 2 3))");
         let peekable = &mut iterator(&mut m).peekable();
         let expr = read_expr(peekable).unwrap();
-        assert_eq!(5, expr.eval(&env).unwrap());
+        assert_eq!(5, expr.eval(&mut env).unwrap());
+    }
+
+    #[test]
+    fn test_read_variable() {
+        let mut env = Environment::new();
+        env.set("a", 3);
+        let mut m = input("a");
+        let peekable = &mut iterator(&mut m).peekable();
+        let expr = read_expr(peekable).unwrap();
+        assert_eq!(3, expr.eval(&mut env).unwrap());
+    }
+
+    #[test]
+    fn test_read_variable_argument() {
+        let mut env = Environment::new();
+        env.set("a", 3);
+        let mut m = input("(+ a 1)");
+        let peekable = &mut iterator(&mut m).peekable();
+        let expr = read_expr(peekable).unwrap();
+        assert_eq!(4, expr.eval(&mut env).unwrap());
+    }
+
+    #[test]
+    fn test_read_assignment() {
+        let mut env = Environment::new();
+        let mut m = input("(set a 1)");
+        let peekable = &mut iterator(&mut m).peekable();
+        let expr = read_expr(peekable).unwrap();
+        expr.eval(&mut env);
+        assert_eq!(1, env.get("a").unwrap());
     }
 }
